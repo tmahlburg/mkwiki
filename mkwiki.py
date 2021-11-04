@@ -14,6 +14,8 @@ wiki_trg = ''
 base_url = ''
 # base URL of the page, where one can edit the article
 edit_base_url = ''
+# file name of the readme
+readme_file_name = 'README.md'
 
 header = """
 <!DOCTYPE html>
@@ -23,11 +25,23 @@ header = """
         <title>Wiki</title>
         <style>
             body {
-              max-width: 80ch;
               padding: 2ch;
               margin: auto;
               font-family: "Noto Serif", Serif;
               font-size: 18px;
+            }
+            @media (min-width: 900px) {
+              body {
+                display: flex;
+              }
+            }
+            .content {
+              display: inline-block;
+              margin: auto;
+              max-width: 80ch;
+            }
+            .index {
+              display: inline-block;
             }
             p {
               text-align: justify;
@@ -63,12 +77,12 @@ footer = """
 """
 
 index_header = """
+<div class="content">
 <h1>Wiki</h1>
 <h2>Index</h2>
 """
 
-
-readme = ''
+index_footer = '</div>'
 
 
 def links(rel_path: str) -> str:
@@ -78,12 +92,30 @@ def links(rel_path: str) -> str:
             + '<a href="' + edit + '">Artikel bearbeiten</a></p>')
 
 
-def build_page(md_content: str, rel_path: str) -> str:
+def build_readme() -> str:
+    with open(os.path.join(wiki_src, readme_file_name), 'r') as f:
+        content = f.read()
+    readme = commonmark.commonmark(content)
+    return readme
+
+
+def build_page(md_content: str, rel_path: str, index: str) -> str:
     content = commonmark.commonmark(md_content)
-    if rel_path.lower() == 'readme.md':
-        global readme
-        readme = content
-    return (header + links(rel_path) + content + footer)
+    # open parent folders in index
+    parents = rel_path.split('/')[:-1]
+    for parent in parents:
+        indent_position = index.find('px">\n<summary>' + parent)
+        indent = index[indent_position-3:indent_position]
+        # only keep numbers
+        indent = ''.join(c for c in indent if c.isdigit())
+        index = index.replace('<details style="margin-left:' + indent
+                              + 'px">\n<summary>' + parent,
+                              '<details style="margin-left:' + indent
+                              + 'px" open>\n<summary>' + parent)
+
+    return (header + '<div class="index">' + index
+            + '</div><div class="content">' + links(rel_path)
+            + content + '</div>' + footer)
 
 
 def build_tree(index_list: list[list[str]]):
@@ -132,11 +164,34 @@ def build_index(index_list: list[str]) -> str:
 
     content = build_index_content(tree.root)
 
-    return (header + index_header + content + readme + footer)
+    return content
+
+
+def build_index_page(index: str, readme: footer):
+    return (header + index_header + index + readme + index_footer + footer)
 
 
 def build_wiki():
+    # get readme, if it exists
+    readme = build_readme()
+    # build up index
     index_list = []
+    for root, dirs, files in os.walk(wiki_src):
+        for name in files:
+            src_path = os.path.join(root, name)
+            rel_path = os.path.relpath(src_path, wiki_src)
+            # only process files with 'md' extension in non hidden dirs
+            if (rel_path[0] != '.'
+                    and os.path.splitext(rel_path)[1] == '.md'):
+                # change extension to html
+                rel_path = os.path.splitext(rel_path)[0] + '.html'
+                index_list.append(rel_path)
+    index_list.sort(key=str.lower)
+    index = build_index(index_list)
+    index_page = build_index_page(index, readme)
+    with open(os.path.join(wiki_trg, 'index.html'), 'w') as f:
+        f.write(index_page)
+    # build pages
     for root, dirs, files in os.walk(wiki_src):
         for name in files:
             src_path = os.path.join(root, name)
@@ -146,18 +201,13 @@ def build_wiki():
                     and os.path.splitext(rel_path)[1] == '.md'):
                 with open(src_path, 'r') as f:
                     content = f.read()
-                page = build_page(content, rel_path)
+                page = build_page(content, rel_path, index)
                 # change extension to html
                 rel_path = os.path.splitext(rel_path)[0] + '.html'
                 trg_path = os.path.join(wiki_trg, rel_path)
                 os.makedirs(os.path.dirname(trg_path), exist_ok=True)
                 with open(trg_path, 'w') as f:
                     f.write(page)
-                index_list.append(rel_path)
-    index_list.sort(key=str.lower)
-    index_page = build_index(index_list)
-    with open(os.path.join(wiki_trg, 'index.html'), 'w') as f:
-        f.write(index_page)
 
 
 class Node:
